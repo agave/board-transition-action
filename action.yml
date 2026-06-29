@@ -11,7 +11,7 @@ inputs:
     description: GitHub Projects v2 project number
     required: true
   owner:
-    description: Owner of the project (user or org login)
+    description: Owner of the project (org login)
     required: true
   token:
     description: GitHub token with project scope
@@ -33,16 +33,16 @@ runs:
         # Resolve project ID
         PROJECT_ID=$(gh api graphql -f query='
         query($owner: String!, $number: Int!) {
-          user(login: $owner) {
+          organization(login: $owner) {
             projectV2(number: $number) { id }
           }
         }' -F owner="$OWNER" -F number="$PROJECT_NUMBER" \
-          | python3 -c "import sys, json; print(json.load(sys.stdin)['data']['user']['projectV2']['id'])")
+          | python3 -c "import sys, json; print(json.load(sys.stdin)['data']['organization']['projectV2']['id'])")
 
         # Resolve status option ID
         OPTION_ID=$(gh api graphql -f query='
         query($owner: String!, $number: Int!) {
-          user(login: $owner) {
+          organization(login: $owner) {
             projectV2(number: $number) {
               field(name: "Status") {
                 ... on ProjectV2SingleSelectField { options { id name } }
@@ -52,7 +52,7 @@ runs:
         }' -F owner="$OWNER" -F number="$PROJECT_NUMBER" \
           | python3 -c "
         import sys, json
-        options = json.load(sys.stdin)['data']['user']['projectV2']['field']['options']
+        options = json.load(sys.stdin)['data']['organization']['projectV2']['field']['options']
         match = [o for o in options if o['name'].lower() == '$STATUS'.lower()]
         if not match:
             print(f'ERROR: Unknown status: $STATUS', file=sys.stderr)
@@ -63,7 +63,7 @@ runs:
         # Resolve field ID
         FIELD_ID=$(gh api graphql -f query='
         query($owner: String!, $number: Int!) {
-          user(login: $owner) {
+          organization(login: $owner) {
             projectV2(number: $number) {
               field(name: "Status") {
                 ... on ProjectV2SingleSelectField { id }
@@ -71,12 +71,12 @@ runs:
             }
           }
         }' -F owner="$OWNER" -F number="$PROJECT_NUMBER" \
-          | python3 -c "import sys, json; print(json.load(sys.stdin)['data']['user']['projectV2']['field']['id'])")
+          | python3 -c "import sys, json; print(json.load(sys.stdin)['data']['organization']['projectV2']['field']['id'])")
 
         # Find the project item for this issue
         ITEM_ID=$(gh api graphql -f query='
         query($owner: String!, $number: Int!) {
-          user(login: $owner) {
+          organization(login: $owner) {
             projectV2(number: $number) {
               items(first: 100) {
                 nodes { id content { ... on Issue { number } } }
@@ -86,7 +86,7 @@ runs:
         }' -F owner="$OWNER" -F number="$PROJECT_NUMBER" \
           | python3 -c "
         import sys, json
-        items = json.load(sys.stdin)['data']['user']['projectV2']['items']['nodes']
+        items = json.load(sys.stdin)['data']['organization']['projectV2']['items']['nodes']
         match = [i for i in items if i.get('content', {}).get('number') == $ISSUE]
         if not match:
             print(f'ERROR: Issue #$ISSUE not found on board', file=sys.stderr)
