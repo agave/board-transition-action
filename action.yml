@@ -1,8 +1,8 @@
 name: Board Transition
 description: Transition a GitHub Projects v2 board item to a new status
 inputs:
-  issue-number:
-    description: Issue number to transition
+  pr-url:
+    description: Pull request URL to add and transition on the board
     required: true
   status:
     description: Target status (Todo, Planning, In Progress, In Review, Done)
@@ -19,90 +19,34 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Transition issue #${{ inputs.issue-number }} to ${{ inputs.status }}
+    - name: Transition to ${{ inputs.status }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token }}
-        ISSUE: ${{ inputs.issue-number }}
+        PR_URL: ${{ inputs.pr-url }}
         STATUS: ${{ inputs.status }}
         PROJECT_NUMBER: ${{ inputs.project-number }}
         OWNER: ${{ inputs.owner }}
       run: |
         set -euo pipefail
 
-        # Resolve project ID
-        PROJECT_ID=$(gh api graphql -f query='
-        query($owner: String!, $number: Int!) {
-          organization(login: $owner) {
-            projectV2(number: $number) { id }
-          }
-        }' -F owner="$OWNER" -F number="$PROJECT_NUMBER" \
-          | python3 -c "import sys, json; print(json.load(sys.stdin)['data']['organization']['projectV2']['id'])")
+        gh project item-add "$PROJECT_NUMBER" --owner "$OWNER" --url "$PR_URL" || true
 
-        # Resolve status option ID
-        OPTION_ID=$(gh api graphql -f query='
-        query($owner: String!, $number: Int!) {
-          organization(login: $owner) {
-            projectV2(number: $number) {
-              field(name: "Status") {
-                ... on ProjectV2SingleSelectField { options { id name } }
-              }
-            }
-          }
-        }' -F owner="$OWNER" -F number="$PROJECT_NUMBER" \
-          | python3 -c "
-        import sys, json
-        options = json.load(sys.stdin)['data']['organization']['projectV2']['field']['options']
-        match = [o for o in options if o['name'].lower() == '$STATUS'.lower()]
-        if not match:
-            print(f'ERROR: Unknown status: $STATUS', file=sys.stderr)
-            sys.exit(1)
-        print(match[0]['id'])
-        ")
+        PROJECT_ID=$(gh project list --owner "$OWNER" --format json \
+          | jq -r --argjson n "$PROJECT_NUMBER" '.projects[] | select(.number == $n) | .id')
 
-        # Resolve field ID
-        FIELD_ID=$(gh api graphql -f query='
-        query($owner: String!, $number: Int!) {
-          organization(login: $owner) {
-            projectV2(number: $number) {
-              field(name: "Status") {
-                ... on ProjectV2SingleSelectField { id }
-              }
-            }
-          }
-        }' -F owner="$OWNER" -F number="$PROJECT_NUMBER" \
-          | python3 -c "import sys, json; print(json.load(sys.stdin)['data']['organization']['projectV2']['field']['id'])")
+        ITEM_ID=$(gh project item-list "$PROJECT_NUMBER" --owner "$OWNER" --format json \
+          | jq -r --arg url "$PR_URL" '.items[] | select(.content.url == $url) | .id')
 
-        # Find the project item for this issue
-        ITEM_ID=$(gh api graphql -f query='
-        query($owner: String!, $number: Int!) {
-          organization(login: $owner) {
-            projectV2(number: $number) {
-              items(first: 100) {
-                nodes { id content { ... on Issue { number } } }
-              }
-            }
-          }
-        }' -F owner="$OWNER" -F number="$PROJECT_NUMBER" \
-          | python3 -c "
-        import sys, json
-        items = json.load(sys.stdin)['data']['organization']['projectV2']['items']['nodes']
-        match = [i for i in items if i.get('content', {}).get('number') == $ISSUE]
-        if not match:
-            print(f'ERROR: Issue #$ISSUE not found on board', file=sys.stderr)
-            sys.exit(1)
-        print(match[0]['id'])
-        ")
+        FIELDS=$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json)
+        FIELD_ID=$(echo "$FIELDS" | jq -r '.fields[] | select(.name == "Status") | .id')
+        OPTION_ID=$(echo "$FIELDS" | jq -r --arg s "$STATUS" \
+          '.fields[] | select(.name == "Status") | .options[] | select(.name == $s) | .id')
 
-        # Transition the ticket
-        gh api graphql -f query='
-        mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
-          updateProjectV2ItemFieldValue(input: {
-            projectId: $project
-            itemId: $item
-            fieldId: $field
-            value: { singleSelectOptionId: $option }
-          }) { projectV2Item { id } }
-        }' -F project="$PROJECT_ID" -F item="$ITEM_ID" -F field="$FIELD_ID" -F option="$OPTION_ID" > /dev/null
+        gh project item-edit \
+          --id "$ITEM_ID" \
+          --project-id "$PROJECT_ID" \
+          --field-id "$FIELD_ID" \
+          --single-select-option-id "$OPTION_ID"
 
-        echo "Issue #$ISSUE → $STATUS"
+        echo "PR → $STATUS"
