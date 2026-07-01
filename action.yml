@@ -30,18 +30,46 @@ runs:
       run: |
         set -euo pipefail
 
-        gh project item-add "$PROJECT_NUMBER" --owner "$OWNER" --url "$PR_URL" || true
+        ITEM_ID=$(gh project item-add "$PROJECT_NUMBER" --owner "$OWNER" --url "$PR_URL" --format json \
+          | jq -r '.id // empty') || true
 
         PROJECT_ID=$(gh project list --owner "$OWNER" --format json \
           | jq -r --argjson n "$PROJECT_NUMBER" '.projects[] | select(.number == $n) | .id')
 
-        ITEM_ID=$(gh project item-list "$PROJECT_NUMBER" --owner "$OWNER" --format json \
-          | jq -r --arg url "$PR_URL" '.items[] | select(.content.url == $url) | .id')
+        if [ -z "$PROJECT_ID" ]; then
+          echo "Project $PROJECT_NUMBER was not found for owner $OWNER" >&2
+          exit 1
+        fi
+
+        if [ -z "$ITEM_ID" ]; then
+          ITEM_ID=$(gh project item-list "$PROJECT_NUMBER" --owner "$OWNER" --format json --limit 1000 \
+            | jq -r --arg url "$PR_URL" '
+              .items[]
+              | select((.content.url // .contentUrl // "") == $url)
+              | .id
+            ' \
+            | head -n 1)
+        fi
+
+        if [ -z "$ITEM_ID" ]; then
+          echo "Project item for $PR_URL was not found in project $PROJECT_NUMBER" >&2
+          exit 1
+        fi
 
         FIELDS=$(gh project field-list "$PROJECT_NUMBER" --owner "$OWNER" --format json)
         FIELD_ID=$(echo "$FIELDS" | jq -r '.fields[] | select(.name == "Status") | .id')
         OPTION_ID=$(echo "$FIELDS" | jq -r --arg s "$STATUS" \
           '.fields[] | select(.name == "Status") | .options[] | select(.name == $s) | .id')
+
+        if [ -z "$FIELD_ID" ]; then
+          echo "Status field was not found in project $PROJECT_NUMBER" >&2
+          exit 1
+        fi
+
+        if [ -z "$OPTION_ID" ]; then
+          echo "Status option '$STATUS' was not found in project $PROJECT_NUMBER" >&2
+          exit 1
+        fi
 
         gh project item-edit \
           --id "$ITEM_ID" \

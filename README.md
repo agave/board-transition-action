@@ -5,12 +5,12 @@ GitHub Action (composite) to transition GitHub Projects v2 board items to a new 
 ## Usage
 
 ```yaml
-- uses: pateketrueke/board-transition-action@main
+- uses: agave/board-transition-action@v1
   with:
-    issue-number: 4
+    pr-url: https://github.com/agave/example/pull/123
     status: "In Review"
-    project-number: 2
-    owner: pateketrueke
+    project-number: 10
+    owner: agave
     token: ${{ secrets.PROJECT_TOKEN }}
 ```
 
@@ -18,8 +18,8 @@ GitHub Action (composite) to transition GitHub Projects v2 board items to a new 
 
 | Input | Required | Description |
 |-------|----------|-------------|
-| `issue-number` | yes | Issue number to transition |
+| `pr-url` | yes | Pull request URL to add and transition |
 | `status` | yes | Target status (Todo, Planning, In Progress, In Review, Done) |
 | `project-number` | yes | GitHub Projects v2 project number |
-| `owner` | yes | Owner of the project (user or org login) |
+| `owner` | yes | Owner of the project (user or organization login) |
 | `token` | yes | GitHub token with `project` scope |
